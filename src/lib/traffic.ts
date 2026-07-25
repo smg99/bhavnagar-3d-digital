@@ -70,9 +70,29 @@ export class TrafficSimulator {
   constructor(network: TrafficNetwork, maxVehicles = 600) {
     this.network = network;
     this.maxVehicles = maxVehicles;
+    const carShape = new THREE.Shape();
+    carShape.moveTo(-2.0, 0.2); // rear bottom
+    carShape.lineTo(-2.0, 0.8); // rear bumper
+    carShape.lineTo(-1.2, 0.8); // trunk
+    carShape.lineTo(-0.6, 1.4); // rear window
+    carShape.lineTo(0.5, 1.4);  // roof
+    carShape.lineTo(1.2, 0.8);  // windshield
+    carShape.lineTo(2.0, 0.8);  // hood
+    carShape.lineTo(2.0, 0.2);  // front bumper
+    carShape.lineTo(-2.0, 0.2); // bottom
+
+    const extrudeSettings = { depth: 1.6, bevelEnabled: true, bevelSegments: 2, steps: 1, bevelSize: 0.1, bevelThickness: 0.1 };
+    const carGeo = new THREE.ExtrudeGeometry(carShape, extrudeSettings);
+    // Center it (depth is 1.6, so translate Z by -0.8)
+    carGeo.translate(0, 0, -0.8);
+    // The car is drawn in XY plane. Our traffic system uses +Z for forward.
+    // Wait, the shape goes from X=-2 (rear) to X=+2 (front).
+    // If we want +Z to be forward, we rotate Y by -90 degrees.
+    carGeo.rotateY(-Math.PI / 2);
+
     this.mesh = new THREE.InstancedMesh(
-      new THREE.BoxGeometry(2, 1.4, 4),
-      new THREE.MeshStandardMaterial({ color: 0xfbbf24, emissive: 0x222200, roughness: 0.5 }),
+      carGeo,
+      new THREE.MeshStandardMaterial({ color: 0xfbbf24, emissive: 0x333300, roughness: 0.4, metalness: 0.5 }),
       maxVehicles
     );
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);

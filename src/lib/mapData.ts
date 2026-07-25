@@ -43,8 +43,8 @@ export interface MapData {
   bounds: { minLng: number; minLat: number; maxLng: number; maxLat: number };
 }
 
-// ~12km radius around Bhavnagar
-const RADIUS = 0.11; // degrees
+// ~16km radius around Bhavnagar
+const RADIUS = 0.15; // degrees
 
 const OVERPASS_URLS = [
   'https://overpass-api.de/api/interpreter',
@@ -62,7 +62,6 @@ function buildQuery() {
 [out:json][timeout:60];
 (
   way["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|service)$"](${s},${w},${n},${e});
-  way["building"](${s},${w},${n},${e});
   way["natural"="water"](${s},${w},${n},${e});
   way["waterway"](${s},${w},${n},${e});
   relation["natural"="water"](${s},${w},${n},${e});
@@ -70,6 +69,7 @@ function buildQuery() {
   node["amenity"~"^(hospital|school|college|university|police|fire_station|bus_station|railway_station|fuel|marketplace|library|post_office|clinic|pharmacy|bank|restaurant|place_of_worship)$"](${s},${w},${n},${e});
   node["tourism"~"^(hotel|museum|attraction|viewpoint)$"](${s},${w},${n},${e});
   node["railway"~"^(station|halt)$"](${s},${w},${n},${e});
+  node["place"~"^(suburb|neighbourhood|locality)$"](${s},${w},${n},${e});
 );
 out geom;
 out body geom;`;
@@ -78,6 +78,17 @@ out body geom;`;
 export async function fetchMapData(onProgress?: (msg: string) => void): Promise<MapData> {
   const query = buildQuery();
   let lastErr: unknown = null;
+
+  const localBuildingsPromise = fetch('/buildings.geojson')
+    .then(r => {
+      if (!r.ok) throw new Error('Network response was not ok');
+      return r.json();
+    })
+    .catch(e => {
+      console.warn('Failed to load local buildings.geojson, falling back to empty buildings array.', e);
+      return null;
+    });
+
   for (const url of OVERPASS_URLS) {
     try {
       onProgress?.(`Fetching map data from ${url.split('/')[2]}...`);
@@ -89,7 +100,8 @@ export async function fetchMapData(onProgress?: (msg: string) => void): Promise<
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       onProgress?.('Parsing map data...');
       const json = await res.json();
-      return parseOverpass(json);
+      const localBuildingsData = await localBuildingsPromise;
+      return parseOverpass(json, localBuildingsData);
     } catch (err) {
       lastErr = err;
       onProgress?.(`Failed: ${(err as Error).message}. Trying next server...`);
@@ -98,7 +110,7 @@ export async function fetchMapData(onProgress?: (msg: string) => void): Promise<
   throw new Error(`All Overpass servers failed: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`);
 }
 
-function parseOverpass(json: any): MapData {
+function parseOverpass(json: any, localBuildingsGeojson?: any): MapData {
   const roads: Road[] = [];
   const buildings: Building[] = [];
   const waterAreas: WaterArea[] = [];
@@ -146,7 +158,7 @@ function parseOverpass(json: any): MapData {
     } else if (el.type === 'node' && el.lon !== undefined && el.lat !== undefined) {
       const tags = el.tags || {};
       const name = tags.name || tags.brand || '';
-      const type = tags.amenity || tags.tourism || tags.railway || tags.shop || '';
+      const type = tags.amenity || tags.tourism || tags.railway || tags.shop || tags.place || '';
       if (name && type) {
         pois.push({ id: el.id, lng: el.lon, lat: el.lat, name, type });
       }
@@ -163,6 +175,43 @@ function parseOverpass(json: any): MapData {
         if (allPts.length) {
           allPts.forEach((p) => updateBounds(p.lng, p.lat));
           waterAreas.push({ id: el.id, polygon: allPts, name: tags.name || '' });
+        }
+      }
+    }
+  }
+
+  if (localBuildingsGeojson && localBuildingsGeojson.features) {
+    for (const f of localBuildingsGeojson.features) {
+      if (f.geometry && f.geometry.type === 'Polygon' && f.geometry.coordinates.length > 0) {
+        const ring = f.geometry.coordinates[0];
+        const pts = ring.map((c: number[]) => ({ lng: c[0], lat: c[1] }));
+        pts.forEach((p: any) => updateBounds(p.lng, p.lat));
+        
+        const heightM = f.properties?.height || 0;
+        buildings.push({
+          id: f.id || Math.random(),
+          polygon: pts,
+          height: heightM,
+          levels: heightM ? Math.round(heightM / 3.2) : 1,
+          name: f.properties?.names?.primary || '',
+          amenity: '',
+        });
+      } else if (f.geometry && f.geometry.type === 'MultiPolygon') {
+        for (const poly of f.geometry.coordinates) {
+          if (poly.length > 0) {
+            const ring = poly[0];
+            const pts = ring.map((c: number[]) => ({ lng: c[0], lat: c[1] }));
+            pts.forEach((p: any) => updateBounds(p.lng, p.lat));
+            const heightM = f.properties?.height || 0;
+            buildings.push({
+              id: f.id || Math.random(),
+              polygon: pts,
+              height: heightM,
+              levels: heightM ? Math.round(heightM / 3.2) : 1,
+              name: f.properties?.names?.primary || '',
+              amenity: '',
+            });
+          }
         }
       }
     }

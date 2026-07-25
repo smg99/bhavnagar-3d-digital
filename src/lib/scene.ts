@@ -56,53 +56,166 @@ function buildRoadGlowGeometry(roads: Road[]) {
 }
 
 function buildBuildings(buildings: Building[]) {
-  // Use instanced boxes. Compute footprint center, width, depth, height.
-  const dummy = new THREE.Object3D();
-  const mesh = new THREE.InstancedMesh(
-    new THREE.BoxGeometry(1, 1, 1),
-    new THREE.MeshStandardMaterial({ vertexColors: false, roughness: 0.7, metalness: 0.15 }),
-    Math.max(1, buildings.length)
-  );
-  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-
-  const colorArr = new Float32Array(buildings.length * 3);
-  const col = new THREE.Color();
-
-  buildings.forEach((b, i) => {
-    // centroid
-    let cx = 0, cz = 0;
-    for (const p of b.polygon) {
-      const lp = lngLatToLocal(p.lng, p.lat);
-      cx += lp.x; cz += lp.z;
+  // First pass: count total vertices needed for roofs and walls
+  let totalTriangles = 0;
+  
+  const buildingData: { pts: THREE.Vector2[], h: number, col: THREE.Color, roofIndices: number[][] }[] = [];
+  
+  for (const b of buildings) {
+    if (b.polygon.length < 3) continue;
+    
+    // Convert to Vector2 points in local space
+    const pts = b.polygon.map(p => {
+      const l = lngLatToLocal(p.lng, p.lat);
+      return new THREE.Vector2(l.x, l.z); // Triangulate in XZ plane
+    });
+    
+    // Remove duplicate last point if it exists (GeoJSON polygons are closed)
+    const first = pts[0];
+    const last = pts[pts.length - 1];
+    if (Math.abs(first.x - last.x) < 0.01 && Math.abs(first.y - last.y) < 0.01) {
+      pts.pop();
     }
-    cx /= b.polygon.length; cz /= b.polygon.length;
-
-    // bounding box for width/depth
+    
+    if (pts.length < 3) continue;
+    
+    // Ensure counter-clockwise winding for consistent normals
+    if (THREE.ShapeUtils.isClockWise(pts)) {
+      pts.reverse();
+    }
+    
+    let roofIndices: number[][] = [];
+    try {
+      roofIndices = THREE.ShapeUtils.triangulateShape(pts, []);
+    } catch (e) {
+      continue; // Skip invalid polygons
+    }
+    
+    const h = Math.max(3, b.height || b.levels * 3.2 || 5);
+    
+    // Calculate area roughly using the bounding box
     let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
-    for (const p of b.polygon) {
-      const lp = lngLatToLocal(p.lng, p.lat);
-      minX = Math.min(minX, lp.x); maxX = Math.max(maxX, lp.x);
-      minZ = Math.min(minZ, lp.z); maxZ = Math.max(maxZ, lp.z);
+    for (const p of pts) {
+      minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+      minZ = Math.min(minZ, p.y); maxZ = Math.max(maxZ, p.y);
     }
-    const w = Math.max(2, maxX - minX);
-    const d = Math.max(2, maxZ - minZ);
-    const h = Math.max(3, b.height || b.levels * 3.2 || 6);
-
-    dummy.position.set(cx, h / 2, cz);
-    dummy.scale.set(w, h, d);
-    dummy.rotation.set(0, 0, 0);
-    dummy.updateMatrix();
-    mesh.setMatrixAt(i, dummy.matrix);
-
-    // color by height: short=light, tall=darker accent
-    const t = Math.min(1, h / 40);
-    col.setHSL(0.08, 0.15, 0.85 - t * 0.55);
-    colorArr[i * 3] = col.r;
-    colorArr[i * 3 + 1] = col.g;
-    colorArr[i * 3 + 2] = col.b;
+    const area = (maxX - minX) * (maxZ - minZ);
+    
+    const col = new THREE.Color();
+    if (area > 800 || h > 20) {
+      // Large commercial/industrial/apartment (cooler, bluish glass)
+      col.setHSL(0.55 + Math.random() * 0.1, 0.4, 0.6 + Math.random() * 0.15);
+    } else if (area < 150 && h <= 10) {
+      // Small residential (warmer, terracotta/slate)
+      col.setHSL(0.05 + Math.random() * 0.05, 0.35, 0.65 + Math.random() * 0.1);
+    } else {
+      // Medium buildings (neutral)
+      col.setHSL(0.1, 0.15, 0.8 + Math.random() * 0.1);
+    }
+    
+    totalTriangles += roofIndices.length; // Roof triangles
+    totalTriangles += pts.length * 2;     // Wall triangles (2 per segment)
+    
+    buildingData.push({ pts, h, col, roofIndices });
+  }
+  
+  // Allocate buffers
+  const numVertices = totalTriangles * 3;
+  const positions = new Float32Array(numVertices * 3);
+  const normals = new Float32Array(numVertices * 3);
+  const colors = new Float32Array(numVertices * 3);
+  
+  let i = 0; // index in Float32Array (i.e. vertex count * 3)
+  
+  for (const b of buildingData) {
+    const { pts, h, col, roofIndices } = b;
+    
+    // Add roof triangles
+    for (const tri of roofIndices) {
+      for (const idx of tri) {
+        const p = pts[idx];
+        positions[i] = p.x;
+        positions[i+1] = h;
+        positions[i+2] = p.y;
+        
+        normals[i] = 0;
+        normals[i+1] = 1;
+        normals[i+2] = 0;
+        
+        colors[i] = col.r;
+        colors[i+1] = col.g;
+        colors[i+2] = col.b;
+        
+        i += 3;
+      }
+    }
+    
+    // Add wall triangles
+    const wallCol = col.clone().multiplyScalar(0.65); // Darken walls slightly for fake shading
+    
+    for (let j = 0; j < pts.length; j++) {
+      const p1 = pts[j];
+      const p2 = pts[(j + 1) % pts.length];
+      
+      const dx = p2.x - p1.x;
+      const dz = p2.y - p1.y;
+      
+      let nx = -dz;
+      let nz = dx;
+      const len = Math.sqrt(nx*nx + nz*nz);
+      if (len > 0) { nx /= len; nz /= len; }
+      
+      const v1x = p1.x, v1y = 0, v1z = p1.y;
+      const v2x = p2.x, v2y = 0, v2z = p2.y;
+      const v3x = p2.x, v3y = h, v3z = p2.y;
+      const v4x = p1.x, v4y = h, v4z = p1.y;
+      
+      // Triangle 1: (v1, v2, v3)
+      positions[i]   = v1x; positions[i+1] = v1y; positions[i+2] = v1z;
+      normals[i]     = nx;  normals[i+1]   = 0;   normals[i+2]   = nz;
+      colors[i]      = wallCol.r; colors[i+1] = wallCol.g; colors[i+2] = wallCol.b;
+      i += 3;
+      
+      positions[i]   = v2x; positions[i+1] = v2y; positions[i+2] = v2z;
+      normals[i]     = nx;  normals[i+1]   = 0;   normals[i+2]   = nz;
+      colors[i]      = wallCol.r; colors[i+1] = wallCol.g; colors[i+2] = wallCol.b;
+      i += 3;
+      
+      positions[i]   = v3x; positions[i+1] = v3y; positions[i+2] = v3z;
+      normals[i]     = nx;  normals[i+1]   = 0;   normals[i+2]   = nz;
+      colors[i]      = wallCol.r; colors[i+1] = wallCol.g; colors[i+2] = wallCol.b;
+      i += 3;
+      
+      // Triangle 2: (v1, v3, v4)
+      positions[i]   = v1x; positions[i+1] = v1y; positions[i+2] = v1z;
+      normals[i]     = nx;  normals[i+1]   = 0;   normals[i+2]   = nz;
+      colors[i]      = wallCol.r; colors[i+1] = wallCol.g; colors[i+2] = wallCol.b;
+      i += 3;
+      
+      positions[i]   = v3x; positions[i+1] = v3y; positions[i+2] = v3z;
+      normals[i]     = nx;  normals[i+1]   = 0;   normals[i+2]   = nz;
+      colors[i]      = wallCol.r; colors[i+1] = wallCol.g; colors[i+2] = wallCol.b;
+      i += 3;
+      
+      positions[i]   = v4x; positions[i+1] = v4y; positions[i+2] = v4z;
+      normals[i]     = nx;  normals[i+1]   = 0;   normals[i+2]   = nz;
+      colors[i]      = wallCol.r; colors[i+1] = wallCol.g; colors[i+2] = wallCol.b;
+      i += 3;
+    }
+  }
+  
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  
+  const material = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 0.8,
+    metalness: 0.1,
   });
-
-  mesh.instanceColor = new THREE.InstancedBufferAttribute(colorArr, 3);
+  
+  const mesh = new THREE.Mesh(geometry, material);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   return mesh;

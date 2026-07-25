@@ -1,0 +1,14 @@
+{
+  "last_release": "2026-07-22.0",
+  "last_run": "2026-07-25T07:16:43.043816+00:00",
+  "theme": "buildings",
+  "type": "building",
+  "bbox": {
+    "xmin": 72.0019,
+    "ymin": 21.6145,
+    "xmax": 72.3019,
+    "ymax": 21.9145
+  },
+  "backend": "geojson",
+  "output": "/Users/sumitg/Projects/bhavnagar-3d-digital/public/buildings.geojson"
+}

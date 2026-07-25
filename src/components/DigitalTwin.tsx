@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { MapControls } from 'three/examples/jsm/controls/MapControls.js';
 import {
   Cloud, CloudRain, CloudSun, CloudLightning, CloudDrizzle, CloudFog, Snowflake,
   Sun, Moon, Wind, Droplets, Thermometer, Eye, Activity, Waves, Building2,
@@ -18,9 +18,8 @@ import {
   fetchWeather, fetchAqi, weatherCodeToText, aqiCategory,
   type WeatherData, type AqiData,
 } from '@/lib/weather';
-import { saveScenario, listScenarios, deleteScenario, onAuthChange, signOut, supabase, type SavedScenario } from '@/lib/supabase';
+import { saveScenario, listScenarios, deleteScenario, supabase, type SavedScenario } from '@/lib/supabase';
 import LabelOverlay, { buildLabels, type LabelItem } from '@/components/LabelOverlay';
-import AuthModal from '@/components/AuthModal';
 
 type Tab = 'overview' | 'traffic' | 'flood' | 'planner';
 
@@ -29,7 +28,7 @@ export default function DigitalTwin() {
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
-  const controlsRef = useRef<OrbitControls | null>(null);
+  const controlsRef = useRef<MapControls | null>(null);
   const trafficRef = useRef<TrafficSimulator | null>(null);
   const floodRef = useRef<FloodSimulator | null>(null);
   const plannerRef = useRef<TownPlanner | null>(null);
@@ -55,6 +54,8 @@ export default function DigitalTwin() {
   const [plannerType, setPlannerType] = useState<PlannerType>('flyover');
   const [plannerEstimate, setPlannerEstimate] = useState<PlannerEstimate | null>(null);
   const [plannerActive, setPlannerActive] = useState(false);
+  const plannerActiveRef = useRef(false);
+  useEffect(() => { plannerActiveRef.current = plannerActive; }, [plannerActive]);
   const [scenarios, setScenarios] = useState<SavedScenario[]>([]);
   const [saving, setSaving] = useState(false);
   const [scenarioName, setScenarioName] = useState('');
@@ -64,12 +65,22 @@ export default function DigitalTwin() {
   const [labels, setLabels] = useState<LabelItem[]>([]);
   const [isNight, setIsNight] = useState(false);
   const [theme, setTheme] = useState<'day' | 'night' | 'light'>('day');
-  const [hoverCoord, setHoverCoord] = useState<{ lng: number; lat: number } | null>(null);
-  const [compassAngle, setCompassAngle] = useState(0);
+  const compassRef = useRef<HTMLDivElement>(null);
+  const hoverCoordRef = useRef<HTMLDivElement>(null);
   const [showLegend, setShowLegend] = useState(false);
-  const [session, setSession] = useState<any>(null);
-  const [showAuth, setShowAuth] = useState(false);
-  const [authMsg, setAuthMsg] = useState<string | null>(null);
+
+  const runHeavyTask = (msg: string, task: () => void | Promise<void>) => {
+    setLoadMsg(msg);
+    setLoading(true);
+    setTimeout(async () => {
+      try {
+        await task();
+      } finally {
+        setLoading(false);
+      }
+    }, 50);
+  };
+
 
   // Load map data
   useEffect(() => {
@@ -108,14 +119,7 @@ export default function DigitalTwin() {
     listScenarios().then(setScenarios).catch(() => {});
   }, []);
 
-  // Auth state
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setSession(data.session)).catch(() => {});
-    const unsub = onAuthChange((s) => setSession(s));
-    return unsub;
-  }, []);
-  const isSignedIn = !!session;
-  const userEmail = session?.user?.email as string | undefined;
+
 
   // Three.js scene setup (runs once when mapData is ready)
   useEffect(() => {
@@ -124,10 +128,10 @@ export default function DigitalTwin() {
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0a0e1a);
-    scene.fog = new THREE.Fog(0x0a0e1a, 10000, 20000);
+    scene.fog = new THREE.Fog(0x0a0e1a, 15000, 30000);
     sceneRef.current = scene;
 
-    const camera = new THREE.PerspectiveCamera(55, mount.clientWidth / mount.clientHeight, 1, 20000);
+    const camera = new THREE.PerspectiveCamera(55, mount.clientWidth / mount.clientHeight, 1, 30000);
     camera.position.set(800, 1200, 1800);
     cameraRef.current = camera;
 
@@ -139,12 +143,12 @@ export default function DigitalTwin() {
     mount.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
-    const controls = new OrbitControls(camera, renderer.domElement);
+    const controls = new MapControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
     controls.maxPolarAngle = Math.PI / 2.1;
     controls.minDistance = 100;
-    controls.maxDistance = 8000;
+    controls.maxDistance = 15000;
     controlsRef.current = controls;
 
     // Lights
@@ -216,7 +220,7 @@ export default function DigitalTwin() {
 
     // Click handler for planner
     const onClick = (e: MouseEvent) => {
-      if (!plannerActive || !plannerRef.current || !camera) return;
+      if (!plannerActiveRef.current || !plannerRef.current || !camera) return;
       const rect = renderer.domElement.getBoundingClientRect();
       const mouse = new THREE.Vector2(
         ((e.clientX - rect.left) / rect.width) * 2 - 1,
@@ -244,7 +248,15 @@ export default function DigitalTwin() {
       const hits = raycasterRef.current.intersectObject(groundRef.current!, false);
       if (hits.length) {
         const p = hits[0].point;
-        setHoverCoord(localToLngLat(p.x, p.z));
+        const coord = localToLngLat(p.x, p.z);
+        if (hoverCoordRef.current) {
+          hoverCoordRef.current.textContent = `${coord.lat.toFixed(5)}, ${coord.lng.toFixed(5)}`;
+          hoverCoordRef.current.style.opacity = '1';
+        }
+      } else {
+        if (hoverCoordRef.current) {
+          hoverCoordRef.current.style.opacity = '0';
+        }
       }
     };
     renderer.domElement.addEventListener('mousemove', onMove);
@@ -266,7 +278,9 @@ export default function DigitalTwin() {
       }
       // compass: angle from camera azimuth
       const az = Math.atan2(camera.position.x - controls.target.x, camera.position.z - controls.target.z);
-      setCompassAngle((-az * 180) / Math.PI);
+      if (compassRef.current) {
+        compassRef.current.style.transform = `rotate(${(-az * 180) / Math.PI}deg)`;
+      }
       renderer.render(scene, camera);
     };
     animate();
@@ -368,40 +382,35 @@ export default function DigitalTwin() {
     }
   }, [plannerType]);
 
-  const handleSaveScenario = useCallback(async () => {
+  const handleSaveScenario = useCallback(() => {
     if (!plannerRef.current || plannerRef.current.points.length < 2) return;
-    if (!isSignedIn) { setShowAuth(true); return; }
-    setSaving(true);
-    try {
-      const name = scenarioName || `${plannerType} ${new Date().toLocaleString()}`;
-      await saveScenario({
-        name,
-        type: plannerType,
-        geojson: plannerRef.current.toGeoJSON(),
-      });
-      setScenarioName('');
-      setScenarios(await listScenarios());
-    } catch (e) {
-      setError('Failed to save scenario. Please try signing in again.');
-    } finally {
-      setSaving(false);
-    }
-  }, [scenarioName, plannerType, isSignedIn]);
+    runHeavyTask('Saving scenario...', async () => {
+      try {
+        const name = scenarioName || `${plannerType} ${new Date().toLocaleString()}`;
+        await saveScenario({
+          name,
+          type: plannerType,
+          geojson: plannerRef.current!.toGeoJSON(),
+        });
+        setScenarioName('');
+        setScenarios(await listScenarios());
+      } catch (e) {
+        setError('Failed to save scenario.');
+      }
+    });
+  }, [scenarioName, plannerType]);
 
-  const handleDeleteScenario = useCallback(async (id: string) => {
-    if (!isSignedIn) { setShowAuth(true); return; }
-    try {
-      await deleteScenario(id);
-      setScenarios(await listScenarios());
-    } catch (e) {
-      setAuthMsg('You can only delete your own scenarios.');
-    }
-  }, [isSignedIn]);
-
-  const handleSignOut = useCallback(async () => {
-    try { await signOut(); } catch {}
-    setSession(null);
+  const handleDeleteScenario = useCallback((id: string) => {
+    runHeavyTask('Deleting scenario...', async () => {
+      try {
+        await deleteScenario(id);
+        setScenarios(await listScenarios());
+      } catch (e) {
+        setError('Failed to delete scenario.');
+      }
+    });
   }, []);
+
 
   const handleUndoPoint = useCallback(() => {
     if (plannerRef.current) {
@@ -459,7 +468,7 @@ export default function DigitalTwin() {
       {/* Label overlay */}
       <LabelOverlay labels={labels} camera={cameraRef.current} renderer={rendererRef.current} showLabels={showLabels} showPois={showPois} />
 
-      {showAuth && <AuthModal onClose={() => setShowAuth(false)} onAuthed={() => {}} />}
+
 
       {/* Top bar */}
       <div className="absolute top-0 left-0 right-0 z-10 flex items-center justify-between px-4 py-3 bg-gradient-to-b from-slate-950/90 to-transparent pointer-events-none">
@@ -484,21 +493,7 @@ export default function DigitalTwin() {
           <button onClick={resetCamera} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900/80 backdrop-blur rounded-lg border border-slate-700 text-slate-200 hover:bg-slate-800 text-sm">
             <RotateCcw className="w-4 h-4" /> Reset View
           </button>
-          {isSignedIn ? (
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900/80 backdrop-blur rounded-lg border border-slate-700 text-slate-200 text-sm">
-                <User className="w-4 h-4 text-cyan-400" />
-                <span className="max-w-[140px] truncate">{userEmail}</span>
-              </div>
-              <button onClick={handleSignOut} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900/80 backdrop-blur rounded-lg border border-slate-700 text-slate-200 hover:bg-slate-800 text-sm">
-                <LogOut className="w-4 h-4" /> Sign out
-              </button>
-            </div>
-          ) : (
-            <button onClick={() => setShowAuth(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-600/80 backdrop-blur rounded-lg border border-cyan-500 text-white hover:bg-cyan-500 text-sm">
-              <LogIn className="w-4 h-4" /> Sign in
-            </button>
-          )}
+
         </div>
       </div>
 
@@ -550,18 +545,15 @@ export default function DigitalTwin() {
       <div className="absolute bottom-28 left-4 z-10 flex items-end gap-3 pointer-events-none">
         <div className="relative w-16 h-16 bg-slate-900/80 backdrop-blur rounded-full border border-slate-700 flex items-center justify-center">
           <Compass className="absolute w-14 h-14 text-slate-500" />
-          <div className="absolute font-bold text-xs text-red-400" style={{ transform: `rotate(${compassAngle}deg)`, transition: 'transform 0.1s' }}>
+          <div ref={compassRef} className="absolute font-bold text-xs text-red-400" style={{ transform: `rotate(0deg)`, transition: 'transform 0.1s' }}>
             <div className="flex flex-col items-center -mt-5">
               <span className="text-red-400">N</span>
               <div className="w-0.5 h-5 bg-red-400" />
             </div>
           </div>
         </div>
-        {hoverCoord && (
-          <div className="bg-slate-900/80 backdrop-blur rounded-lg border border-slate-700 px-2 py-1 text-xs text-slate-300 font-mono">
-            {hoverCoord.lat.toFixed(5)}, {hoverCoord.lng.toFixed(5)}
-          </div>
-        )}
+        <div ref={hoverCoordRef} className="bg-slate-900/80 backdrop-blur rounded-lg border border-slate-700 px-2 py-1 text-xs text-slate-300 font-mono transition-opacity opacity-0">
+        </div>
       </div>
 
       {/* Legend panel */}
@@ -628,7 +620,7 @@ export default function DigitalTwin() {
                     <input
                       type="checkbox"
                       checked={showLayers[l.key as keyof typeof showLayers]}
-                      onChange={(e) => setShowLayers({ ...showLayers, [l.key]: e.target.checked })}
+                      onChange={(e) => runHeavyTask(`Updating ${l.label} layer...`, () => setShowLayers({ ...showLayers, [l.key]: e.target.checked }))}
                       className="accent-cyan-500"
                     />
                     {l.label}
@@ -637,11 +629,11 @@ export default function DigitalTwin() {
               </div>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-3 pt-3 border-t border-slate-700">
                 <label className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
-                  <input type="checkbox" checked={showLabels} onChange={(e) => setShowLabels(e.target.checked)} className="accent-cyan-500" />
+                  <input type="checkbox" checked={showLabels} onChange={(e) => runHeavyTask('Updating labels...', () => setShowLabels(e.target.checked))} className="accent-cyan-500" />
                   <Tag className="w-3.5 h-3.5" /> Area / building names
                 </label>
                 <label className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
-                  <input type="checkbox" checked={showPois} onChange={(e) => setShowPois(e.target.checked)} className="accent-cyan-500" />
+                  <input type="checkbox" checked={showPois} onChange={(e) => runHeavyTask('Updating POI markers...', () => setShowPois(e.target.checked))} className="accent-cyan-500" />
                   <MapPin className="w-3.5 h-3.5" /> POI markers
                 </label>
               </div>
@@ -655,7 +647,7 @@ export default function DigitalTwin() {
                 </div>
               )}
               <p className="text-xs text-slate-500 mt-3">
-                Drag to rotate, scroll to zoom, right-drag to pan. Data: OpenStreetMap (Overpass), Open-Meteo.
+                Left-drag to pan, right-drag to rotate, scroll to zoom. Data: OpenStreetMap (Overpass), Open-Meteo.
               </p>
             </div>
           )}
@@ -780,10 +772,7 @@ export default function DigitalTwin() {
                       {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />} Save
                     </button>
                   </div>
-                  {!isSignedIn && (
-                    <p className="text-xs text-amber-400/80 mt-2">Sign in to save scenarios to your account.</p>
-                  )}
-                  {authMsg && <p className="text-xs text-red-400 mt-2">{authMsg}</p>}
+
                 </div>
 
                 <div className="md:col-span-2">

@@ -105,6 +105,7 @@ interface ScreenLabel extends LabelItem {
   y: number;
   behind: boolean;
   dist: number;
+  maxDist: number;
 }
 
 export default function LabelOverlay({ labels, camera, renderer, showLabels, showPois }: Props) {
@@ -134,11 +135,21 @@ export default function LabelOverlay({ labels, camera, renderer, showLabels, sho
         const x = (tmp.x * 0.5 + 0.5) * w;
         const y = (-tmp.y * 0.5 + 0.5) * h;
         const dist = camera.position.distanceTo(item.world);
-        out.push({ ...item, x, y, behind, dist });
+        
+        let maxDist = 4000;
+        if (item.kind === 'road' || item.kind === 'water') {
+          maxDist = 15000;
+        } else if (isPoi && item.poiType) {
+          const majorTypes = ['university', 'college', 'museum', 'attraction', 'viewpoint', 'railway_station', 'bus_station', 'place_of_worship', 'suburb', 'neighbourhood', 'locality'];
+          if (majorTypes.includes(item.poiType)) {
+            maxDist = 20000;
+          }
+        }
+        
+        out.push({ ...item, x, y, behind, dist, maxDist });
       }
       // cull far labels to avoid clutter
-      const maxDist = 4500;
-      const filtered = out.filter((l) => !l.behind && l.dist < maxDist);
+      const filtered = out.filter((l) => !l.behind && l.dist < l.maxDist);
       // sort by distance for z-ordering (closer drawn last = on top)
       filtered.sort((a, b) => b.dist - a.dist);
       setScreenLabels(filtered);
@@ -149,13 +160,23 @@ export default function LabelOverlay({ labels, camera, renderer, showLabels, sho
 
   return (
     <div ref={containerRef} className="absolute inset-0 pointer-events-none z-[5] overflow-hidden">
-      {screenLabels.map((l) => {
+      {screenLabels.map((l, i) => {
         if (l.kind === 'poi') {
+          if (l.poiType && ['suburb', 'neighbourhood', 'locality'].includes(l.poiType)) {
+             return (
+               <div key={`${l.id}-${i}`} className="absolute -translate-x-1/2 -translate-y-1/2 px-2 py-1 bg-transparent pointer-events-none"
+                 style={{ left: l.x, top: l.y, opacity: Math.min(1, Math.max(0, (l.maxDist - l.dist) / 1000)) }}>
+                 <div className="text-white font-black tracking-[0.1em] text-center" style={{ fontSize: l.poiType === 'suburb' ? '18px' : '13px', textShadow: '0px 2px 8px rgba(0,0,0,0.9), 0px 0px 3px rgba(0,0,0,0.9)' }}>
+                   {l.text.toUpperCase()}
+                 </div>
+               </div>
+             );
+          }
           const color = poiColor(l.poiType || '');
           const icon = POI_ICONS[l.poiType || ''] || '•';
           return (
-            <div key={l.id} className="absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center"
-              style={{ left: l.x, top: l.y, opacity: Math.min(1, 1 - l.dist / 4500) }}>
+            <div key={`${l.id}-${i}`} className="absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center"
+              style={{ left: l.x, top: l.y, opacity: Math.min(1, Math.max(0, (l.maxDist - l.dist) / 1000)) }}>
               <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shadow-lg border-2 border-white/40"
                 style={{ backgroundColor: color }}>
                 {icon}
@@ -172,8 +193,8 @@ export default function LabelOverlay({ labels, camera, renderer, showLabels, sho
           l.kind === 'building' ? 'text-amber-200 border-amber-500/40' :
           'text-slate-200 border-slate-500/40';
         return (
-          <div key={l.id} className="absolute -translate-x-1/2 -translate-y-1/2 px-1.5 py-0.5 bg-slate-900/70 backdrop-blur rounded text-[10px] whitespace-nowrap max-w-[160px] truncate border"
-            style={{ left: l.x, top: l.y, opacity: Math.min(1, 1 - l.dist / 4500) }}>
+          <div key={`${l.id}-${i}`} className="absolute -translate-x-1/2 -translate-y-1/2 px-1.5 py-0.5 bg-slate-900/70 backdrop-blur rounded text-[10px] whitespace-nowrap max-w-[160px] truncate border"
+            style={{ left: l.x, top: l.y, opacity: Math.min(1, Math.max(0, (l.maxDist - l.dist) / 1000)) }}>
             <span className={colorClass}>{l.text}</span>
           </div>
         );
