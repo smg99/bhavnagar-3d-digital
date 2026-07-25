@@ -3,10 +3,10 @@ import { lngLatToLocal, localToLngLat, BHAVNAGAR_CENTER } from './geo';
 import type { MapData, Road, Building, Poi } from './mapData';
 
 export interface SceneLayers {
+  ground: THREE.Mesh;
   roads: THREE.LineSegments;
   roadGlow: THREE.LineSegments;
-  buildings: THREE.InstancedMesh;
-  ground: THREE.Mesh;
+  buildings: THREE.Mesh;
   water: THREE.Group;
   waterways: THREE.LineSegments;
   grid: THREE.GridHelper;

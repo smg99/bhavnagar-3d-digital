@@ -543,7 +543,23 @@ export default function DigitalTwin() {
 
       {/* Compass + coordinate readout (bottom-left) */}
       <div className="absolute bottom-28 left-4 z-10 flex items-end gap-3 pointer-events-none">
-        <div className="relative w-16 h-16 bg-slate-900/80 backdrop-blur rounded-full border border-slate-700 flex items-center justify-center">
+        <button 
+          onClick={() => {
+            const controls = controlsRef.current;
+            const camera = cameraRef.current;
+            if (!controls || !camera) return;
+            const dist = camera.position.distanceTo(controls.target);
+            const polar = controls.getPolarAngle();
+            camera.position.set(
+              controls.target.x,
+              controls.target.y + dist * Math.cos(polar),
+              controls.target.z + dist * Math.sin(polar)
+            );
+            controls.update();
+          }}
+          title="Reset to North"
+          className="relative w-16 h-16 bg-slate-900/80 backdrop-blur rounded-full border border-slate-700 flex items-center justify-center pointer-events-auto hover:bg-slate-800 transition-colors shadow-lg"
+        >
           <Compass className="absolute w-14 h-14 text-slate-500" />
           <div ref={compassRef} className="absolute font-bold text-xs text-red-400" style={{ transform: `rotate(0deg)`, transition: 'transform 0.1s' }}>
             <div className="flex flex-col items-center -mt-5">
@@ -551,7 +567,7 @@ export default function DigitalTwin() {
               <div className="w-0.5 h-5 bg-red-400" />
             </div>
           </div>
-        </div>
+        </button>
         <div ref={hoverCoordRef} className="bg-slate-900/80 backdrop-blur rounded-lg border border-slate-700 px-2 py-1 text-xs text-slate-300 font-mono transition-opacity opacity-0">
         </div>
       </div>
