@@ -638,7 +638,7 @@ export default function DigitalTwin() {
                       checked={showLayers[l.key as keyof typeof showLayers]}
                       onChange={(e) => {
                         const checked = e.target.checked;
-                        runHeavyTask(`Updating ${l.label} layer...`, () => setShowLayers(prev => ({ ...prev, [l.key]: checked })));
+                        setShowLayers(prev => ({ ...prev, [l.key]: checked }));
                       }}
                       className="accent-cyan-500"
                     />
@@ -650,14 +650,14 @@ export default function DigitalTwin() {
                 <label className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
                   <input type="checkbox" checked={showLabels} onChange={(e) => {
                     const checked = e.target.checked;
-                    runHeavyTask('Updating labels...', () => setShowLabels(checked));
+                    setShowLabels(checked);
                   }} className="accent-cyan-500" />
                   <Tag className="w-3.5 h-3.5" /> Area / building names
                 </label>
                 <label className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
                   <input type="checkbox" checked={showPois} onChange={(e) => {
                     const checked = e.target.checked;
-                    runHeavyTask('Updating POI markers...', () => setShowPois(checked));
+                    setShowPois(checked);
                   }} className="accent-cyan-500" />
                   <MapPin className="w-3.5 h-3.5" /> POI markers
                 </label>
