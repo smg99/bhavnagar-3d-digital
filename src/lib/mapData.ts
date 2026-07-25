@@ -48,8 +48,10 @@ const RADIUS = 0.15; // degrees
 
 const OVERPASS_URLS = [
   'https://overpass-api.de/api/interpreter',
+  'https://lz4.overpass-api.de/api/interpreter',
+  'https://z.overpass-api.de/api/interpreter',
+  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
-  'https://overpass.private.coffee/api/interpreter',
 ];
 
 function buildQuery() {
