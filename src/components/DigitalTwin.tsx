@@ -620,7 +620,10 @@ export default function DigitalTwin() {
                     <input
                       type="checkbox"
                       checked={showLayers[l.key as keyof typeof showLayers]}
-                      onChange={(e) => runHeavyTask(`Updating ${l.label} layer...`, () => setShowLayers({ ...showLayers, [l.key]: e.target.checked }))}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        runHeavyTask(`Updating ${l.label} layer...`, () => setShowLayers(prev => ({ ...prev, [l.key]: checked })));
+                      }}
                       className="accent-cyan-500"
                     />
                     {l.label}
@@ -629,11 +632,17 @@ export default function DigitalTwin() {
               </div>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-3 pt-3 border-t border-slate-700">
                 <label className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
-                  <input type="checkbox" checked={showLabels} onChange={(e) => runHeavyTask('Updating labels...', () => setShowLabels(e.target.checked))} className="accent-cyan-500" />
+                  <input type="checkbox" checked={showLabels} onChange={(e) => {
+                    const checked = e.target.checked;
+                    runHeavyTask('Updating labels...', () => setShowLabels(checked));
+                  }} className="accent-cyan-500" />
                   <Tag className="w-3.5 h-3.5" /> Area / building names
                 </label>
                 <label className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
-                  <input type="checkbox" checked={showPois} onChange={(e) => runHeavyTask('Updating POI markers...', () => setShowPois(e.target.checked))} className="accent-cyan-500" />
+                  <input type="checkbox" checked={showPois} onChange={(e) => {
+                    const checked = e.target.checked;
+                    runHeavyTask('Updating POI markers...', () => setShowPois(checked));
+                  }} className="accent-cyan-500" />
                   <MapPin className="w-3.5 h-3.5" /> POI markers
                 </label>
               </div>
