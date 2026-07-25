@@ -1,7 +1,12 @@
 import DigitalTwin from '@/components/DigitalTwin';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 
 function App() {
-  return <DigitalTwin />;
+  return (
+    <ErrorBoundary>
+      <DigitalTwin />
+    </ErrorBoundary>
+  );
 }
 
 export default App;
