@@ -79,7 +79,7 @@ export async function fetchMapData(onProgress?: (msg: string) => void): Promise<
   const query = buildQuery();
   let lastErr: unknown = null;
 
-  const localBuildingsPromise = fetch('/buildings.geojson')
+  const localBuildingsPromise = fetch(import.meta.env.BASE_URL + 'buildings.geojson')
     .then(r => {
       if (!r.ok) throw new Error('Network response was not ok');
       return r.json();
